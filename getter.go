@@ -96,32 +96,36 @@ func (g *HttpGetter) do() error {
 
 	g.Body = res.Body
 
-	if g.StatusCode < 1 {
-		g.StatusCode = res.StatusCode
-		g.Header = res.Header
-		if v := g.Header.Get(acceptHeader); v != acceptValue {
-			g.b.Done()
+	if res.StatusCode == g.expectedStatus {
+		if g.StatusCode < 1 {
+			g.setResponse(res)
+			g.expectedStatus = 206
 		}
-
-		i, _ := strconv.ParseInt(res.Header.Get(clenHeader), 10, 0)
-		g.ContentLength = i
-	}
-
-	if res.StatusCode != g.expectedStatus {
+	} else {
 		if g.expectedStatus == 206 {
 			g.Close()
 		}
 
 		if res.StatusCode > 399 && res.StatusCode < 500 {
+			g.setResponse(res)
 			g.b.Done()
 		}
 
 		return fmt.Errorf("Expected status code %d, got %d", g.expectedStatus, res.StatusCode)
 	}
 
-	g.expectedStatus = 206
-
 	return nil
+}
+
+func (g *HttpGetter) setResponse(res *http.Response) {
+	g.StatusCode = res.StatusCode
+	g.Header = res.Header
+	if v := g.Header.Get(acceptHeader); v != acceptValue {
+		g.b.Done()
+	}
+
+	i, _ := strconv.ParseInt(res.Header.Get(clenHeader), 10, 0)
+	g.ContentLength = i
 }
 
 const (

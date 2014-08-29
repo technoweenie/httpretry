@@ -23,6 +23,17 @@ func TestRetry(t *testing.T) {
 			}
 
 			head := w.Header()
+			head.Set("Content-Type", "text/plain")
+			head.Set("Content-Length", "4")
+			w.WriteHeader(500)
+			w.Write([]byte("boom"))
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			if v := r.Header.Get("Range"); v != "" {
+				t.Errorf("Unexpected Range header on request 3: %s", v)
+			}
+
+			head := w.Header()
 			head.Set("Accept-Ranges", "bytes")
 			head.Set("Content-Type", "text/plain")
 			head.Set("Content-Length", "5")
@@ -31,7 +42,7 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=2-4" {
-				t.Errorf("Unexpected Range header on request 3: %s", v)
+				t.Errorf("Unexpected Range header on request 4: %s", v)
 			}
 
 			head := w.Header()
@@ -44,7 +55,7 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request 4: %s", v)
+				t.Errorf("Unexpected Range header on request 5: %s", v)
 			}
 
 			time.Sleep(time.Second)
@@ -52,7 +63,7 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request 5: %s", v)
+				t.Errorf("Unexpected Range header on request 6: %s", v)
 			}
 
 			head := w.Header()
@@ -63,7 +74,7 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request 6: %s", v)
+				t.Errorf("Unexpected Range header on request 7: %s", v)
 			}
 
 			head := w.Header()
