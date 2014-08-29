@@ -140,7 +140,7 @@ func (g *HttpGetter) connect() error {
 			g.Close()
 		}
 
-		if res.StatusCode > 399 && res.StatusCode < 500 {
+		if res.StatusCode < 500 || res.StatusCode > 599 {
 			g.setResponse(res)
 			g.b.Done()
 		}
