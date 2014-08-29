@@ -107,14 +107,15 @@ func (g *HttpGetter) do() error {
 		g.ContentLength = i
 	}
 
-	if res.StatusCode > 399 && res.StatusCode < 500 {
-		g.b.Done()
-	}
-
 	if res.StatusCode != g.expectedStatus {
 		if g.expectedStatus == 206 {
 			g.Close()
 		}
+
+		if res.StatusCode > 399 && res.StatusCode < 500 {
+			g.b.Done()
+		}
+
 		return fmt.Errorf("Expected status code %d, got %d", g.expectedStatus, res.StatusCode)
 	}
 
