@@ -112,12 +112,13 @@ func (g *HttpGetter) do() error {
 	}
 
 	if res.StatusCode != g.expectedStatus {
+		if g.expectedStatus == 206 {
+			g.Close()
+		}
 		return fmt.Errorf("Expected status code %d, got %d", g.expectedStatus, res.StatusCode)
 	}
 
-	if g.StatusCode < 1 {
-		g.expectedStatus = 206
-	}
+	g.expectedStatus = 206
 
 	return nil
 }
