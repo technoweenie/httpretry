@@ -7,10 +7,16 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestRetry(t *testing.T) {
+	t.Parallel()
 	requests := []func(w http.ResponseWriter, r *http.Request){
+		func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(time.Second)
+			writeTestData(w, 404, "never reached")
+		},
 		func(w http.ResponseWriter, r *http.Request) {
 			head := w.Header()
 			head.Set("Accept-Ranges", "bytes")
@@ -27,6 +33,10 @@ func TestRetry(t *testing.T) {
 			head.Set("Content-Length", "3")
 			w.WriteHeader(206)
 			w.Write([]byte("cd"))
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(time.Second)
+			writeTestData(w, 404, "never reached")
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			head := w.Header()
@@ -94,6 +104,7 @@ func TestRetry(t *testing.T) {
 }
 
 func TestSingleSuccess(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeTestData(w, 200, "ok")
 	}))
@@ -132,6 +143,7 @@ func TestSingleSuccess(t *testing.T) {
 }
 
 func TestSkipRetryWithoutAcceptRange(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		head := w.Header()
 		head.Set("Content-Type", "text/plain")
@@ -174,6 +186,7 @@ func TestSkipRetryWithoutAcceptRange(t *testing.T) {
 }
 
 func TestRetryWith400(t *testing.T) {
+	t.Parallel()
 	status := 200
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeTestData(w, status, "client error")
@@ -206,4 +219,9 @@ func writeTestData(w http.ResponseWriter, status int, body string) {
 	head.Set("Content-Length", strconv.Itoa(len(by)))
 	w.WriteHeader(status)
 	w.Write(by)
+}
+
+func init() {
+	tport := http.DefaultTransport.(*http.Transport)
+	tport.ResponseHeaderTimeout = 500 * time.Millisecond
 }
