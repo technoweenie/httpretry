@@ -10,6 +10,8 @@ import (
 	"github.com/cenkalti/backoff"
 )
 
+type Callback func(*http.Response, error)
+
 type HttpGetter struct {
 	Request        *http.Request
 	Body           io.ReadCloser
@@ -20,6 +22,7 @@ type HttpGetter struct {
 	Header         http.Header
 	client         *http.Client
 	b              *QuittableBackOff
+	cb             Callback
 	next           time.Duration
 	expectedStatus int
 }
@@ -35,6 +38,10 @@ func (g *HttpGetter) Do() (int, http.Header) {
 
 	if g.client == nil {
 		g.SetClient(nil)
+	}
+
+	if g.cb == nil {
+		g.SetCallback(nil)
 	}
 
 	backoff.Retry(g.do, g.b)
@@ -53,6 +60,14 @@ func (g *HttpGetter) SetClient(c *http.Client) {
 		g.client = http.DefaultClient
 	} else {
 		g.client = c
+	}
+}
+
+func (g *HttpGetter) SetCallback(f Callback) {
+	if f == nil {
+		g.cb = cb
+	} else {
+		g.cb = f
 	}
 }
 
@@ -104,6 +119,7 @@ func (g *HttpGetter) do() error {
 
 	res, err := g.client.Do(g.Request)
 	g.Attempts += 1
+	g.cb(res, err)
 	if err != nil {
 		return err
 	}
@@ -141,6 +157,8 @@ func (g *HttpGetter) setResponse(res *http.Response) {
 	i, _ := strconv.ParseInt(res.Header.Get(clenHeader), 10, 0)
 	g.ContentLength = i
 }
+
+var cb = func(r *http.Response, e error) {}
 
 const (
 	acceptHeader = "Accept-Ranges"

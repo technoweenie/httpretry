@@ -14,6 +14,8 @@ import (
 
 func TestRetry(t *testing.T) {
 	t.Parallel()
+
+	i := 0
 	requests := []func(w http.ResponseWriter, r *http.Request){
 		func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(time.Second)
@@ -21,10 +23,11 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "" {
-				t.Errorf("Unexpected Range header on request 2: %s", v)
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
 			}
 
 			head := w.Header()
+			head.Set("Test-Request", strconv.Itoa(i))
 			head.Set("Content-Type", "text/plain")
 			head.Set("Content-Length", "4")
 			w.WriteHeader(500)
@@ -32,10 +35,11 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "" {
-				t.Errorf("Unexpected Range header on request 3: %s", v)
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
 			}
 
 			head := w.Header()
+			head.Set("Test-Request", strconv.Itoa(i))
 			head.Set("Accept-Ranges", "bytes")
 			head.Set("Content-Type", "text/plain")
 			head.Set("Content-Length", "5")
@@ -44,10 +48,11 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=2-4" {
-				t.Errorf("Unexpected Range header on request 4: %s", v)
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
 			}
 
 			head := w.Header()
+			head.Set("Test-Request", strconv.Itoa(i))
 			head.Set("Content-Range", "bytes 2-4/4")
 			head.Set("Accept-Ranges", "bytes")
 			head.Set("Content-Type", "text/plain")
@@ -57,7 +62,7 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request 5: %s", v)
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
 			}
 
 			time.Sleep(time.Second)
@@ -65,10 +70,11 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request 6: %s", v)
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
 			}
 
 			head := w.Header()
+			head.Set("Test-Request", strconv.Itoa(i))
 			head.Set("Content-Type", "text/plain")
 			head.Set("Content-Length", "4")
 			w.WriteHeader(500)
@@ -76,10 +82,11 @@ func TestRetry(t *testing.T) {
 		},
 		func(w http.ResponseWriter, r *http.Request) {
 			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request 7: %s", v)
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
 			}
 
 			head := w.Header()
+			head.Set("Test-Request", strconv.Itoa(i))
 			head.Set("Content-Range", "bytes 4-4/4")
 			head.Set("Accept-Ranges", "bytes")
 			head.Set("Content-Type", "text/plain")
@@ -88,7 +95,6 @@ func TestRetry(t *testing.T) {
 			w.Write([]byte("e"))
 		},
 	}
-	i := 0
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if i < len(requests) {
@@ -109,7 +115,7 @@ func TestRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(req)
+	code, head, reader := testGetter(t, req, 0, 0, 500, 200, 206, 0, 500, 206)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -148,7 +154,7 @@ func TestSingleSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(req)
+	code, head, reader := testGetter(t, req)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -191,7 +197,7 @@ func TestSkipRetryWithoutAcceptRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(req)
+	code, head, reader := testGetter(t, req)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -232,7 +238,7 @@ func TestSkipRetryWith400(t *testing.T) {
 	}
 
 	for status = 400; status < 500; status++ {
-		code, head, reader := testGetter(req)
+		code, head, reader := testGetter(t, req)
 
 		if code != status {
 			t.Errorf("Expected status %d, got %d", status, code)
@@ -277,8 +283,28 @@ func init() {
 	tport.ResponseHeaderTimeout = 500 * time.Millisecond
 }
 
-func testGetter(req *http.Request) (int, http.Header, *HttpGetter) {
+func testGetter(t *testing.T, req *http.Request, expectedCodes ...int) (int, http.Header, *HttpGetter) {
 	g := Getter(req)
+	if len(expectedCodes) > 0 {
+		i := 0
+		g.SetCallback(func(res *http.Response, err error) {
+			if i < len(expectedCodes) {
+				exp := expectedCodes[i]
+				if exp == 0 {
+					if err == nil {
+						t.Errorf("Expected error for request %d", i)
+					}
+				} else {
+					if res != nil && exp != res.StatusCode {
+						t.Errorf("Request %d expected code %d, got %d", i, exp, res.StatusCode)
+					}
+				}
+			} else {
+				t.Errorf("Request %d was unexpected", i)
+			}
+			i += 1
+		})
+	}
 	g.SetBackOff(zeroBackOff)
 	s, h := g.Do()
 	return s, h, g
