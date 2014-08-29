@@ -81,6 +81,8 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 			time.Sleep(g.next)
 
 			return 0, nil
+		} else {
+			g.b.Reset()
 		}
 	}
 
