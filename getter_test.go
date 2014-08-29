@@ -220,7 +220,7 @@ func TestSkipRetryWith400(t *testing.T) {
 
 	for status = 400; status < 500; status++ {
 		code, head, reader := Getter(req, nil)
-		reader.Close()
+
 		if code != status {
 			t.Errorf("Expected status %d, got %d", status, code)
 		}
@@ -228,6 +228,22 @@ func TestSkipRetryWith400(t *testing.T) {
 		if ctype := head.Get("Content-Type"); ctype != "text/plain" {
 			t.Fatalf("Unexpected Content Type: %s", ctype)
 		}
+
+		buf := &bytes.Buffer{}
+		written, err := io.Copy(buf, reader)
+		if err != nil {
+			t.Errorf("Copy error: %s", err)
+		}
+
+		if written != 12 {
+			t.Errorf("Wrote %d", written)
+		}
+
+		if b := buf.String(); b != "client error" {
+			t.Errorf("Got %s", b)
+		}
+
+		reader.Close()
 	}
 }
 
