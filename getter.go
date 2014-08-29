@@ -12,6 +12,21 @@ import (
 
 type Callback func(*http.Response, error)
 
+// An HttpGetter is a wrapper around an HTTP Client that handles retries for
+// certain types of errors.  It implements the io.ReadCloser interface, and
+// must be closed to clean up any lingering connections.  However, Do() must
+// be called before the first Read() is attempted.
+//
+// 4xx responses are considered errors due to a bad request by the client, and
+// will not be restarted.
+//
+// Go errors and 5xx responses will be retried, even if the connection times
+// out, or drops before the entire response has been received.  Retries are
+// based on the Range header.  So, servers must advertise their capability to
+// fetch partial with the Accept-Ranges.
+//
+// A successful response should have a status of 200 if no Range header was
+// sent, or 206.
 type HttpGetter struct {
 	Request        *http.Request
 	Body           io.ReadCloser
@@ -27,10 +42,13 @@ type HttpGetter struct {
 	expectedStatus int
 }
 
+// Getter initializes the *HttpGetter.
 func Getter(req *http.Request) *HttpGetter {
 	return &HttpGetter{Request: req, expectedStatus: 200}
 }
 
+// Do returns the status code and response header for the first successful
+// response.  Any Go errors or 5xx status codes will trigger retries.
 func (g *HttpGetter) Do() (int, http.Header) {
 	if g.b == nil {
 		g.SetBackOff(nil)
@@ -48,6 +66,8 @@ func (g *HttpGetter) Do() (int, http.Header) {
 	return g.StatusCode, g.Header
 }
 
+// SetBackOff sets the backoff configuration for this *HttpGetter.  If nil,
+// DefaultBackoff() is called instead.
 func (g *HttpGetter) SetBackOff(b backoff.BackOff) {
 	if b == nil {
 		b = DefaultBackOff()
@@ -55,6 +75,8 @@ func (g *HttpGetter) SetBackOff(b backoff.BackOff) {
 	g.b = &QuittableBackOff{b: b}
 }
 
+// SetClient sets the HTTP Client for this *HttpGetter.  If nil,
+// http.DefaultClient is used.
 func (g *HttpGetter) SetClient(c *http.Client) {
 	if c == nil {
 		g.client = http.DefaultClient
@@ -63,6 +85,7 @@ func (g *HttpGetter) SetClient(c *http.Client) {
 	}
 }
 
+// SetCallback sets a function to be called after every attempted HTTP response.
 func (g *HttpGetter) SetCallback(f Callback) {
 	if f == nil {
 		g.cb = cb
@@ -71,6 +94,11 @@ func (g *HttpGetter) SetCallback(f Callback) {
 	}
 }
 
+// Read implements the io.Reader interface.  If a non EOF error is returned,
+// the HTTP body is closed, and no Go error is returned so that Read() can
+// get called again.  The backoff retry logic is used to re-establish HTTP
+// connections.  Once the number of retries has been exhausted, the Go error
+// is finally returned.
 func (g *HttpGetter) Read(b []byte) (int, error) {
 	if g.Body == nil {
 		if err := g.connect(); err != nil {
@@ -91,6 +119,7 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	if err != nil {
 		g.Close()
 
+		// return nil so that Read() is called again.
 		if err != io.EOF {
 			return read, nil
 		}
@@ -99,6 +128,7 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	return read, err
 }
 
+// Close cleans up any lingering HTTP connections.
 func (g *HttpGetter) Close() error {
 	var err error
 	if g.Body != nil {
@@ -109,7 +139,12 @@ func (g *HttpGetter) Close() error {
 	return err
 }
 
+// connect attempts to make the http response.  If any Go error is returned, or
+// a status other than 200 or 206 is encountered, an error is returned to signal
+// to the *HttpGetter to retry later.
 func (g *HttpGetter) connect() error {
+	// Non 5xx statuses or the lack of an Accept-Ranges response header will
+	// prevent future retries.
 	if g.b.IsDone {
 		return io.EOF
 	}
@@ -131,15 +166,18 @@ func (g *HttpGetter) connect() error {
 
 	g.Body = res.Body
 
+	// successful response
 	if res.StatusCode == g.expectedStatus {
 		if g.setResponse(res) {
 			g.expectedStatus = 206
 		}
 	} else {
+		// if we're looking for a partial response, just close and retry later.
 		if g.expectedStatus == 206 {
 			g.Close()
 		}
 
+		// if it's not a 5xx, stop retries.
 		if res.StatusCode < 500 || res.StatusCode > 599 {
 			g.setResponse(res)
 			g.b.Done()
@@ -151,6 +189,8 @@ func (g *HttpGetter) connect() error {
 	return nil
 }
 
+// setResponse sets the response status, header, and content length from the
+// first successful response.
 func (g *HttpGetter) setResponse(res *http.Response) bool {
 	if g.StatusCode > 0 {
 		return false
