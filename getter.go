@@ -44,7 +44,7 @@ func (g *HttpGetter) Do() (int, http.Header) {
 		g.SetCallback(nil)
 	}
 
-	backoff.Retry(g.do, g.b)
+	backoff.Retry(g.connect, g.b)
 	return g.StatusCode, g.Header
 }
 
@@ -73,7 +73,7 @@ func (g *HttpGetter) SetCallback(f Callback) {
 
 func (g *HttpGetter) Read(b []byte) (int, error) {
 	if g.Body == nil {
-		if err := g.do(); err != nil {
+		if err := g.connect(); err != nil {
 			if g.next = g.b.NextBackOff(); g.next == backoff.Stop {
 				return 0, err
 			}
@@ -110,7 +110,7 @@ func (g *HttpGetter) Close() error {
 	return err
 }
 
-func (g *HttpGetter) do() error {
+func (g *HttpGetter) connect() error {
 	if g.b.IsDone {
 		return io.EOF
 	}
