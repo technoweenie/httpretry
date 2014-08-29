@@ -88,13 +88,12 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 
 	read, err := g.Body.Read(b)
 	g.BytesRead += int64(read)
-	if err != nil && err != io.EOF {
+	if err != nil {
 		g.Close()
-		return read, nil
-	}
 
-	if err == io.EOF {
-		g.Close()
+		if err != io.EOF {
+			return read, nil
+		}
 	}
 
 	return read, err
