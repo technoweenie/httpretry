@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/cenkalti/backoff"
 )
 
 func TestRetry(t *testing.T) {
@@ -107,7 +109,7 @@ func TestRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := Getter(req, nil)
+	code, head, reader := testGetter(req)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -146,7 +148,7 @@ func TestSingleSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := Getter(req, nil)
+	code, head, reader := testGetter(req)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -189,7 +191,7 @@ func TestSkipRetryWithoutAcceptRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := Getter(req, nil)
+	code, head, reader := testGetter(req)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -230,7 +232,7 @@ func TestSkipRetryWith400(t *testing.T) {
 	}
 
 	for status = 400; status < 500; status++ {
-		code, head, reader := Getter(req, nil)
+		code, head, reader := testGetter(req)
 
 		if code != status {
 			t.Errorf("Expected status %d, got %d", status, code)
@@ -268,7 +270,13 @@ func writeTestData(w http.ResponseWriter, status int, body string) {
 	w.Write(by)
 }
 
+var zeroBackOff = &backoff.ZeroBackOff{}
+
 func init() {
 	tport := http.DefaultTransport.(*http.Transport)
 	tport.ResponseHeaderTimeout = 500 * time.Millisecond
+}
+
+func testGetter(req *http.Request) (int, http.Header, *HttpGetter) {
+	return Getter(req, nil, zeroBackOff)
 }

@@ -24,13 +24,16 @@ type HttpGetter struct {
 	expectedStatus int
 }
 
-func Getter(req *http.Request, cli *http.Client) (int, http.Header, *HttpGetter) {
+func Getter(req *http.Request, cli *http.Client, b backoff.BackOff) (int, http.Header, *HttpGetter) {
 	if cli == nil {
 		cli = http.DefaultClient
 	}
 
 	g := &HttpGetter{Request: req, Client: cli, expectedStatus: 200}
-	g.SetBackOff(nil)
+	if b == nil {
+		b = DefaultBackOff()
+	}
+	g.b = &QuittableBackOff{b: b}
 	backoff.Retry(g.do, g.b)
 	return g.StatusCode, g.Header, g
 }
@@ -70,13 +73,6 @@ func (g *HttpGetter) Close() error {
 	}
 
 	return err
-}
-
-func (g *HttpGetter) SetBackOff(b backoff.BackOff) {
-	if b == nil {
-		b = DefaultBackOff()
-	}
-	g.b = &QuittableBackOff{b: b}
 }
 
 func (g *HttpGetter) do() error {
