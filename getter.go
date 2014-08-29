@@ -11,7 +11,6 @@ import (
 )
 
 type HttpGetter struct {
-	Client         *http.Client
 	Request        *http.Request
 	Body           io.ReadCloser
 	Attempts       int
@@ -19,6 +18,7 @@ type HttpGetter struct {
 	BytesRead      int64
 	StatusCode     int
 	Header         http.Header
+	client         *http.Client
 	b              *QuittableBackOff
 	next           time.Duration
 	expectedStatus int
@@ -33,8 +33,8 @@ func (g *HttpGetter) Do() (int, http.Header) {
 		g.SetBackOff(nil)
 	}
 
-	if g.Client == nil {
-		g.Client = http.DefaultClient
+	if g.client == nil {
+		g.SetClient(nil)
 	}
 
 	backoff.Retry(g.do, g.b)
@@ -46,6 +46,14 @@ func (g *HttpGetter) SetBackOff(b backoff.BackOff) {
 		b = DefaultBackOff()
 	}
 	g.b = &QuittableBackOff{b: b}
+}
+
+func (g *HttpGetter) SetClient(c *http.Client) {
+	if c == nil {
+		g.client = http.DefaultClient
+	} else {
+		g.client = c
+	}
 }
 
 func (g *HttpGetter) Read(b []byte) (int, error) {
@@ -94,7 +102,7 @@ func (g *HttpGetter) do() error {
 		g.Request.Header.Set(rangeHeader, fmt.Sprintf(rangeFormat, g.BytesRead, g.ContentLength-1))
 	}
 
-	res, err := g.Client.Do(g.Request)
+	res, err := g.client.Do(g.Request)
 	g.Attempts += 1
 	if err != nil {
 		return err
