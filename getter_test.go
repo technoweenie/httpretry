@@ -278,5 +278,8 @@ func init() {
 }
 
 func testGetter(req *http.Request) (int, http.Header, *HttpGetter) {
-	return Getter(req, nil, zeroBackOff)
+	g := Getter(req)
+	g.SetBackOff(zeroBackOff)
+	s, h := g.Do()
+	return s, h, g
 }
