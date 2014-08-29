@@ -185,7 +185,7 @@ func TestSkipRetryWithoutAcceptRange(t *testing.T) {
 	reader.Close()
 }
 
-func TestRetryWith400(t *testing.T) {
+func TestSkipRetryWith400(t *testing.T) {
 	t.Parallel()
 	status := 200
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
