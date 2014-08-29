@@ -115,7 +115,7 @@ func (g *HttpGetter) do() error {
 		return io.EOF
 	}
 
-	if g.BytesRead > 0 {
+	if g.BytesRead > 0 && g.ContentLength > 0 {
 		g.Request.Header.Set(rangeHeader, fmt.Sprintf(rangeFormat, g.BytesRead, g.ContentLength-1))
 	}
 
@@ -126,11 +126,14 @@ func (g *HttpGetter) do() error {
 		return err
 	}
 
+	if res.StatusCode == 0 {
+		return EmptyResponse
+	}
+
 	g.Body = res.Body
 
 	if res.StatusCode == g.expectedStatus {
-		if g.StatusCode < 1 {
-			g.setResponse(res)
+		if g.setResponse(res) {
 			g.expectedStatus = 206
 		}
 	} else {
@@ -149,7 +152,11 @@ func (g *HttpGetter) do() error {
 	return nil
 }
 
-func (g *HttpGetter) setResponse(res *http.Response) {
+func (g *HttpGetter) setResponse(res *http.Response) bool {
+	if g.StatusCode > 0 {
+		return false
+	}
+
 	g.StatusCode = res.StatusCode
 	g.Header = res.Header
 	if v := g.Header.Get(acceptHeader); v != acceptValue {
@@ -158,9 +165,13 @@ func (g *HttpGetter) setResponse(res *http.Response) {
 
 	i, _ := strconv.ParseInt(res.Header.Get(clenHeader), 10, 0)
 	g.ContentLength = i
+	return true
 }
 
-var cb = func(r *http.Response, e error) {}
+var (
+	cb            = func(r *http.Response, e error) {}
+	EmptyResponse = fmt.Errorf("Received response with status code 0")
+)
 
 const (
 	acceptHeader = "Accept-Ranges"
