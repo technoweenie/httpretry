@@ -285,9 +285,10 @@ func init() {
 
 func testGetter(t *testing.T, req *http.Request, expectedCodes ...int) (int, http.Header, *HttpGetter) {
 	g := Getter(req)
-	if len(expectedCodes) > 0 {
+	expectedAttempts := len(expectedCodes)
+	if expectedAttempts > 0 {
 		i := 0
-		g.SetCallback(func(res *http.Response, err error) {
+		g.OnResponse(func(res *http.Response, err error) {
 			if i < len(expectedCodes) {
 				exp := expectedCodes[i]
 				if exp == 0 {
@@ -304,7 +305,14 @@ func testGetter(t *testing.T, req *http.Request, expectedCodes ...int) (int, htt
 			}
 			i += 1
 		})
+
+		g.OnClose(func(g *HttpGetter) {
+			if g.Attempts != expectedAttempts {
+				t.Errorf("Expected %d attempts, got %d", expectedAttempts, g.Attempts)
+			}
+		})
 	}
+
 	g.SetBackOff(zeroBackOff)
 	s, h := g.Do()
 	return s, h, g

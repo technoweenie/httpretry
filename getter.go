@@ -10,7 +10,8 @@ import (
 	"github.com/cenkalti/backoff"
 )
 
-type Callback func(*http.Response, error)
+type ResponseCallback func(*http.Response, error)
+type CloseCallback func(*HttpGetter)
 
 // An HttpGetter is a wrapper around an HTTP Client that handles retries for
 // certain types of errors.  It implements the io.ReadCloser interface, and
@@ -37,9 +38,11 @@ type HttpGetter struct {
 	Header         http.Header
 	client         *http.Client
 	b              *QuittableBackOff
-	cb             Callback
+	rcb            ResponseCallback
+	ccb            CloseCallback
 	next           time.Duration
 	expectedStatus int
+	closed         bool
 }
 
 // Getter initializes the *HttpGetter.
@@ -58,8 +61,12 @@ func (g *HttpGetter) Do() (int, http.Header) {
 		g.SetClient(nil)
 	}
 
-	if g.cb == nil {
-		g.SetCallback(nil)
+	if g.rcb == nil {
+		g.OnResponse(nil)
+	}
+
+	if g.ccb == nil {
+		g.OnClose(nil)
 	}
 
 	backoff.Retry(g.connect, g.b)
@@ -85,12 +92,21 @@ func (g *HttpGetter) SetClient(c *http.Client) {
 	}
 }
 
-// SetCallback sets a function to be called after every attempted HTTP response.
-func (g *HttpGetter) SetCallback(f Callback) {
+// OnResponse sets a function to be called after every attempted HTTP response.
+func (g *HttpGetter) OnResponse(f ResponseCallback) {
 	if f == nil {
-		g.cb = cb
+		g.rcb = rcb
 	} else {
-		g.cb = f
+		g.rcb = f
+	}
+}
+
+// OnClose sets a function to be called after the getter has closed.
+func (g *HttpGetter) OnClose(f CloseCallback) {
+	if f == nil {
+		g.ccb = ccb
+	} else {
+		g.ccb = f
 	}
 }
 
@@ -117,7 +133,7 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	read, err := g.Body.Read(b)
 	g.BytesRead += int64(read)
 	if err != nil {
-		g.Close()
+		g.reset()
 
 		// return nil so that Read() is called again.
 		if err != io.EOF {
@@ -128,14 +144,25 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	return read, err
 }
 
-// Close cleans up any lingering HTTP connections.
+// Close cleans up any lingering HTTP connections.  CLosing the getter prevents
+// further HTTP requests from being attempted.
 func (g *HttpGetter) Close() error {
+	g.b.Done()
+	if !g.closed {
+		g.ccb(g)
+		g.closed = true
+	}
+
+	return g.reset()
+}
+
+// reset resets the Body io.ReadCloser
+func (g *HttpGetter) reset() error {
 	var err error
 	if g.Body != nil {
 		err = g.Body.Close()
 		g.Body = nil
 	}
-
 	return err
 }
 
@@ -155,7 +182,7 @@ func (g *HttpGetter) connect() error {
 
 	res, err := g.client.Do(g.Request)
 	g.Attempts += 1
-	g.cb(res, err)
+	g.rcb(res, err)
 	if err != nil {
 		return err
 	}
@@ -174,7 +201,7 @@ func (g *HttpGetter) connect() error {
 	} else {
 		// if we're looking for a partial response, just close and retry later.
 		if g.expectedStatus == 206 {
-			g.Close()
+			g.reset()
 		}
 
 		// if it's not a 5xx, stop retries.
@@ -208,7 +235,8 @@ func (g *HttpGetter) setResponse(res *http.Response) bool {
 }
 
 var (
-	cb            = func(r *http.Response, e error) {}
+	rcb           = func(r *http.Response, e error) {}
+	ccb           = func(g *HttpGetter) {}
 	EmptyResponse = fmt.Errorf("Received response with status code 0")
 )
 
