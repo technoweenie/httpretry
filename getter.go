@@ -168,6 +168,8 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	return read, err
 }
 
+// Sha256 gets the hex encoded SHA 256 signature of the content that's been read
+// so far.
 func (g *HttpGetter) Sha256() string {
 	return hex.EncodeToString(g.hasher.Sum(nil))
 }
