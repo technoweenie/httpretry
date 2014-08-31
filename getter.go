@@ -1,7 +1,10 @@
 package httpretry
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"strconv"
@@ -37,6 +40,7 @@ type HttpGetter struct {
 	StatusCode     int
 	Header         http.Header
 	client         *http.Client
+	hasher         hash.Hash
 	b              *QuittableBackOff
 	rcb            ResponseCallback
 	ccb            CloseCallback
@@ -47,7 +51,10 @@ type HttpGetter struct {
 
 // Getter initializes the *HttpGetter.
 func Getter(req *http.Request) *HttpGetter {
-	return &HttpGetter{Request: req, expectedStatus: 200}
+	return &HttpGetter{
+		Request:        req,
+		expectedStatus: 200,
+	}
 }
 
 // Do returns the status code and response header for the first successful
@@ -59,6 +66,10 @@ func (g *HttpGetter) Do() (int, http.Header) {
 
 	if g.client == nil {
 		g.SetClient(nil)
+	}
+
+	if g.hasher == nil {
+		g.SetHash(nil)
 	}
 
 	if g.rcb == nil {
@@ -89,6 +100,16 @@ func (g *HttpGetter) SetClient(c *http.Client) {
 		g.client = http.DefaultClient
 	} else {
 		g.client = c
+	}
+}
+
+// SetHash sets the Hash used to calculate a signature of the content read from
+// this *HttpGetter.  If nil, a new sha256 hash is created.
+func (g *HttpGetter) SetHash(h hash.Hash) {
+	if h == nil {
+		g.hasher = sha256.New()
+	} else {
+		g.hasher = h
 	}
 }
 
@@ -131,7 +152,10 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	}
 
 	read, err := g.Body.Read(b)
-	g.BytesRead += int64(read)
+	if read > 0 {
+		g.BytesRead += int64(read)
+		g.hasher.Write(b[:read])
+	}
 	if err != nil {
 		g.reset()
 
@@ -142,6 +166,10 @@ func (g *HttpGetter) Read(b []byte) (int, error) {
 	}
 
 	return read, err
+}
+
+func (g *HttpGetter) Sha256() string {
+	return hex.EncodeToString(g.hasher.Sum(nil))
 }
 
 // Close cleans up any lingering HTTP connections.  CLosing the getter prevents

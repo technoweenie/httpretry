@@ -139,6 +139,10 @@ func TestRetry(t *testing.T) {
 		t.Errorf("Got %s", b)
 	}
 
+	if s := reader.Sha256(); s != "36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c" {
+		t.Errorf("Bad SHA256: %s", s)
+	}
+
 	reader.Close()
 }
 
@@ -176,6 +180,10 @@ func TestSingleSuccess(t *testing.T) {
 
 	if b := buf.String(); b != "ok" {
 		t.Errorf("Got %s", b)
+	}
+
+	if s := reader.Sha256(); s != "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df" {
+		t.Errorf("Bad SHA256: %s", s)
 	}
 
 	reader.Close()
@@ -219,6 +227,10 @@ func TestSkipRetryWithoutAcceptRange(t *testing.T) {
 
 	if b := buf.String(); b != "o" {
 		t.Errorf("Got %s", b)
+	}
+
+	if s := reader.Sha256(); s != "65c74c15a686187bb6bbf9958f494fc6b80068034a659a9ad44991b08c58f2d2" {
+		t.Errorf("Bad SHA256: %s", s)
 	}
 
 	reader.Close()
