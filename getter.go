@@ -235,7 +235,7 @@ func (g *HttpGetter) connect() error {
 		}
 
 		// if it's not a 5xx, stop retries.
-		if res.StatusCode < 500 || res.StatusCode > 599 {
+		if res.StatusCode > 0 && (res.StatusCode < 500 || res.StatusCode > 599) {
 			g.setResponse(res)
 			g.b.Done()
 		}
