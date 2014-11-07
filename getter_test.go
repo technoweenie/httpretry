@@ -44,6 +44,18 @@ func TestRetry(t *testing.T) {
 			head.Set("Content-Type", "text/plain")
 			head.Set("Content-Length", "5")
 			w.WriteHeader(200)
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			if v := r.Header.Get("Range"); v != "" {
+				t.Errorf("Unexpected Range header on request %d: %s", v, i)
+			}
+
+			head := w.Header()
+			head.Set("Test-Request", strconv.Itoa(i))
+			head.Set("Accept-Ranges", "bytes")
+			head.Set("Content-Type", "text/plain")
+			head.Set("Content-Length", "5")
+			w.WriteHeader(200)
 			w.Write([]byte("ab"))
 		},
 		func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +127,7 @@ func TestRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(t, req, 0, 0, 500, 200, 206, 0, 500, 206)
+	code, head, reader := testGetter(t, req, 0, 0, 500, 200, 200, 206, 0, 500, 206)
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)

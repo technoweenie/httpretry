@@ -32,29 +32,25 @@ type CloseCallback func(*HttpGetter)
 // A successful response should have a status of 200 if no Range header was
 // sent, or 206.
 type HttpGetter struct {
-	Request        *http.Request
-	Body           io.ReadCloser
-	Attempts       int
-	ContentLength  int64
-	BytesRead      int64
-	StatusCode     int
-	Header         http.Header
-	client         *http.Client
-	hasher         hash.Hash
-	b              *QuittableBackOff
-	rcb            ResponseCallback
-	ccb            CloseCallback
-	next           time.Duration
-	expectedStatus int
-	closed         bool
+	Request       *http.Request
+	Body          io.ReadCloser
+	Attempts      int
+	ContentLength int64
+	BytesRead     int64
+	StatusCode    int
+	Header        http.Header
+	client        *http.Client
+	hasher        hash.Hash
+	b             *QuittableBackOff
+	rcb           ResponseCallback
+	ccb           CloseCallback
+	next          time.Duration
+	closed        bool
 }
 
 // Getter initializes the *HttpGetter.
 func Getter(req *http.Request) *HttpGetter {
-	return &HttpGetter{
-		Request:        req,
-		expectedStatus: 200,
-	}
+	return &HttpGetter{Request: req}
 }
 
 // Do returns the status code and response header for the first successful
@@ -206,7 +202,10 @@ func (g *HttpGetter) connect() error {
 		return io.EOF
 	}
 
+	expectedStatus := 200
+
 	if g.BytesRead > 0 && g.ContentLength > 0 {
+		expectedStatus = 206
 		g.Request.Header.Set(rangeHeader, fmt.Sprintf(rangeFormat, g.BytesRead, g.ContentLength-1))
 	}
 
@@ -224,13 +223,11 @@ func (g *HttpGetter) connect() error {
 	g.Body = res.Body
 
 	// successful response
-	if res.StatusCode == g.expectedStatus {
-		if g.setResponse(res) {
-			g.expectedStatus = 206
-		}
+	if res.StatusCode == expectedStatus {
+		g.setResponse(res)
 	} else {
 		// if we're looking for a partial response, just close and retry later.
-		if g.expectedStatus == 206 {
+		if expectedStatus == 206 {
 			g.reset()
 		}
 
@@ -240,7 +237,7 @@ func (g *HttpGetter) connect() error {
 			g.b.Done()
 		}
 
-		return fmt.Errorf("Expected status code %d, got %d", g.expectedStatus, res.StatusCode)
+		return fmt.Errorf("Expected status code %d, got %d", expectedStatus, res.StatusCode)
 	}
 
 	return nil
@@ -248,9 +245,9 @@ func (g *HttpGetter) connect() error {
 
 // setResponse sets the response status, header, and content length from the
 // first successful response.
-func (g *HttpGetter) setResponse(res *http.Response) bool {
+func (g *HttpGetter) setResponse(res *http.Response) {
 	if g.StatusCode > 0 {
-		return false
+		return
 	}
 
 	g.StatusCode = res.StatusCode
@@ -261,7 +258,6 @@ func (g *HttpGetter) setResponse(res *http.Response) bool {
 
 	i, _ := strconv.ParseInt(res.Header.Get(clenHeader), 10, 0)
 	g.ContentLength = i
-	return true
 }
 
 var (
