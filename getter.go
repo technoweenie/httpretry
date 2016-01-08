@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"time"
@@ -235,6 +236,10 @@ func (g *HttpGetter) connect() error {
 		if res.StatusCode > 0 && (res.StatusCode < 500 || res.StatusCode > 599) {
 			g.setResponse(res)
 			g.b.Done()
+		} else {
+			// Drain the body, necessary for go <= 1.3
+			io.Copy(ioutil.Discard, res.Body)
+			res.Body.Close()
 		}
 
 		return fmt.Errorf("Expected status code %d, got %d", expectedStatus, res.StatusCode)
