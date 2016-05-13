@@ -49,9 +49,8 @@ func DialWithTimeout(timeout time.Duration) func(netw, addr string) (net.Conn, e
 	return NewDialer(timeout).Dial
 }
 
-// DialWithTimeouts creates a Dial function that returns a connection with
-// separate timeouts for dialing the connection, maintaining the keep-alive
-// connection, and inactivity.  This is designed for long running HTTP requests.
+// NewDialer creates a dialer object with configurable timeoutes for keep alive
+// and inactivity.
 func NewDialer(timeout time.Duration) *dialer {
 	return &dialer{Timeout: timeout, KeepAlive: timeout, Inactivity: timeout}
 }
