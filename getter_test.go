@@ -2,10 +2,13 @@ package httpretry
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,110 +18,41 @@ import (
 func TestRetry(t *testing.T) {
 	t.Parallel()
 
-	i := 0
-	requests := []func(w http.ResponseWriter, r *http.Request){
-		func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(time.Second)
-			writeTestData(w, 404, "never reached")
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			head := w.Header()
-			head.Set("Test-Request", strconv.Itoa(i))
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "4")
-			w.WriteHeader(500)
-			w.Write([]byte("boom"))
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			head := w.Header()
-			head.Set("Test-Request", strconv.Itoa(i))
-			head.Set("Accept-Ranges", "bytes")
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "5")
-			w.WriteHeader(200)
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			head := w.Header()
-			head.Set("Test-Request", strconv.Itoa(i))
-			head.Set("Accept-Ranges", "bytes")
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "5")
-			w.WriteHeader(200)
-			w.Write([]byte("ab"))
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "bytes=2-4" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			head := w.Header()
-			head.Set("Test-Request", strconv.Itoa(i))
-			head.Set("Content-Range", "bytes 2-4/4")
-			head.Set("Accept-Ranges", "bytes")
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "3")
-			w.WriteHeader(206)
-			w.Write([]byte("cd"))
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			time.Sleep(time.Second)
-			writeTestData(w, 404, "never reached")
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			head := w.Header()
-			head.Set("Test-Request", strconv.Itoa(i))
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "4")
-			w.WriteHeader(500)
-			w.Write([]byte("boom"))
-		},
-		func(w http.ResponseWriter, r *http.Request) {
-			if v := r.Header.Get("Range"); v != "bytes=4-4" {
-				t.Errorf("Unexpected Range header on request %d: %s", v, i)
-			}
-
-			head := w.Header()
-			head.Set("Test-Request", strconv.Itoa(i))
-			head.Set("Content-Range", "bytes 4-4/4")
-			head.Set("Accept-Ranges", "bytes")
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "1")
-			w.WriteHeader(206)
-			w.Write([]byte("e"))
-		},
-	}
-
+	numRequests := 0
+	mutex := &sync.Mutex{}
+	content := []byte("0123456789")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if i < len(requests) {
-			requests[i](w, r)
-			i += 1
-		} else {
-			head := w.Header()
-			head.Set("Content-Type", "text/plain")
-			head.Set("Content-Length", "7")
-			w.WriteHeader(404)
-			w.Write([]byte("missing"))
+		mutex.Lock()
+		numRequests += 1
+		mutex.Unlock()
+
+		status := 200
+
+		i := 0
+		v := r.Header.Get("Range")
+		if strings.HasPrefix(v, "bytes=") {
+			i, _ = strconv.Atoi(strings.SplitN(v, "-", 2)[0][6:])
 		}
+
+		head := w.Header()
+		head.Set("Accept-Ranges", "bytes")
+		head.Set("Content-Type", "text/plain")
+
+		if i > 0 {
+			head.Set("Content-Range", fmt.Sprintf("bytes %d-4/4", i))
+			status = 206
+		}
+
+		if numRequests%2 == 0 {
+			head.Set("Content-Length", "4")
+			w.WriteHeader(500)
+			w.Write([]byte("BOOM"))
+			return
+		}
+
+		head.Set("Content-Length", fmt.Sprintf("%d", len(content)-i))
+		w.WriteHeader(status)
+		w.Write(content[i : i+1])
 	}))
 	defer ts.Close()
 
@@ -127,7 +61,9 @@ func TestRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(t, req, 0, 0, 500, 200, 200, 206, 0, 500, 206)
+	reader := testGetter(t, req)
+	seenCodes := trackSeenCodes(reader)
+	code, head := reader.Do()
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -143,17 +79,25 @@ func TestRetry(t *testing.T) {
 		t.Errorf("Copy error: %s", err)
 	}
 
-	if written != 5 {
+	if written != 10 {
 		t.Errorf("Wrote %d", written)
 	}
 
-	if b := buf.String(); b != "abcde" {
+	if b := buf.String(); b != "0123456789" {
 		t.Errorf("Got %s", b)
 	}
 
-	if s := reader.Sha256(); s != "36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c" {
+	if s := reader.Sha256(); s != "84d89877f0d4041efb6bf91a16f0248f2fd573e6af05c19f96bedb9f882f7882" {
 		t.Errorf("Bad SHA256: %s", s)
 	}
+
+	if numRequests < 2 {
+		t.Errorf("Only made %d request(s)?", numRequests)
+	}
+
+	assertSeenCodes(t, seenCodes, 200, 206, 500)
+
+	t.Logf("requests made: %d", numRequests)
 
 	reader.Close()
 }
@@ -170,7 +114,8 @@ func TestSingleSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(t, req)
+	reader := testGetter(t, req)
+	code, head := reader.Do()
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -217,7 +162,8 @@ func TestSkipRetryWithoutAcceptRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, head, reader := testGetter(t, req)
+	reader := testGetter(t, req)
+	code, head := reader.Do()
 
 	if code != 200 {
 		t.Errorf("Unexpected status %d", code)
@@ -262,7 +208,8 @@ func TestSkipRetryWith400(t *testing.T) {
 	}
 
 	for status = 400; status < 500; status++ {
-		code, head, reader := testGetter(t, req)
+		reader := testGetter(t, req)
+		code, head := reader.Do()
 
 		if code != status {
 			t.Errorf("Expected status %d, got %d", status, code)
@@ -307,37 +254,31 @@ func init() {
 	tport.ResponseHeaderTimeout = 500 * time.Millisecond
 }
 
-func testGetter(t *testing.T, req *http.Request, expectedCodes ...int) (int, http.Header, *HttpGetter) {
-	g := Getter(req)
-	expectedAttempts := len(expectedCodes)
-	if expectedAttempts > 0 {
-		i := 0
-		g.OnResponse(func(res *http.Response, err error) {
-			if i < len(expectedCodes) {
-				exp := expectedCodes[i]
-				if exp == 0 {
-					if err == nil {
-						t.Errorf("Expected error for request %d", i)
-					}
-				} else {
-					if res != nil && exp != res.StatusCode {
-						t.Errorf("Request %d expected code %d, got %d", i, exp, res.StatusCode)
-					}
-				}
-			} else {
-				t.Errorf("Request %d was unexpected", i)
-			}
-			i += 1
-		})
+func trackSeenCodes(g *HttpGetter) map[int]bool {
+	seenCodes := make(map[int]bool)
+	mu := &sync.Mutex{}
+	g.OnResponse(func(res *http.Response, err error) {
+		mu.Lock()
+		if res == nil {
+			seenCodes[0] = true
+		} else {
+			seenCodes[res.StatusCode] = true
+		}
+		mu.Unlock()
+	})
+	return seenCodes
+}
 
-		g.OnClose(func(g *HttpGetter) {
-			if g.Attempts != expectedAttempts {
-				t.Errorf("Expected %d attempts, got %d", expectedAttempts, g.Attempts)
-			}
-		})
+func assertSeenCodes(t *testing.T, seenCodes map[int]bool, expectedCodes ...int) {
+	for _, code := range expectedCodes {
+		if !seenCodes[code] {
+			t.Errorf("Expected to see response %d", code)
+		}
 	}
+}
 
+func testGetter(t *testing.T, req *http.Request, expectedCodes ...int) *HttpGetter {
+	g := Getter(req)
 	g.SetBackOff(zeroBackOff)
-	s, h := g.Do()
-	return s, h, g
+	return g
 }
